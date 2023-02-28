@@ -2,27 +2,24 @@
 import React from 'react' // eslint-disable-line
 import { Plugin } from '@remixproject/engine'
 import { JsonDataRequest, RejectRequest, SuccessRequest } from '../providers/abstract-provider'
-import Web3 from 'web3'
 import { IProvider } from './abstract-provider'
 
-const noInjectedProviderMsg = 'No injected provider found. Make sure your provider (e.g. MetaMask) is active and running (when recently activated you may have to reload the page).'
-
-export class InjectedProvider extends Plugin implements IProvider {
-  provider: any
+export abstract class InjectedProvider extends Plugin implements IProvider {
   options: { [id: string] : any } = {}
 
   constructor (profile) {
     super(profile)
-    if ((window as any).ethereum) {
-      this.provider = new Web3((window as any).ethereum)
-    }
   }
 
+  abstract getInjectedProvider(): any
+  abstract notFound(): string
+
   askPermission (throwIfNoInjectedProvider) {
-    if ((typeof (window as any).ethereum) !== "undefined" && (typeof (window as any).ethereum.request) === "function") {
-      (window as any).ethereum.request({ method: "eth_requestAccounts" })
+    const web3Provider = this.getInjectedProvider()
+    if (typeof web3Provider !== "undefined" && typeof web3Provider.request === "function") {
+      web3Provider.request({ method: "eth_requestAccounts" })
     } else if (throwIfNoInjectedProvider) {
-      throw new Error(noInjectedProviderMsg)
+      throw new Error(this.notFound())
     }
   }
 
@@ -33,14 +30,11 @@ export class InjectedProvider extends Plugin implements IProvider {
   }
 
   async init () {
-    const injectedProvider = (window as any).ethereum
+    const injectedProvider = this.getInjectedProvider()
     if (injectedProvider === undefined) {
-      this.call('notification', 'toast', noInjectedProviderMsg)
-      throw new Error(noInjectedProviderMsg)
+      this.call('notification', 'toast', this.notFound())
+      throw new Error(this.notFound())
     } else {
-      if (injectedProvider && injectedProvider._metamask && injectedProvider._metamask.isUnlocked) {
-        if (!await injectedProvider._metamask.isUnlocked()) this.call('notification', 'toast', 'Please make sure the injected provider is unlocked (e.g Metamask).')
-      }
       this.askPermission(true)
     }
     return {}
@@ -55,13 +49,14 @@ export class InjectedProvider extends Plugin implements IProvider {
   private async sendAsyncInternal (data: JsonDataRequest, resolve: SuccessRequest, reject: RejectRequest): Promise<void> {
     // Check the case where current environment is VM on UI and it still sends RPC requests
     // This will be displayed on UI tooltip as 'cannot get account list: Environment Updated !!'
-    if (!this.provider) {
+    const web3Provider = this.getInjectedProvider()
+    if (!web3Provider) {
       this.call('notification', 'toast', 'No injected provider (e.g Metamask) has been found.')
       return reject(new Error('no injected provider found.'))
     }
     try {
-      if ((window as any) && typeof (window as any).ethereum.request === "function") (window as any).ethereum.request({ method: "eth_requestAccounts" });
-      const resultData = await this.provider.currentProvider.send(data.method, data.params)
+      if ((window as any) && typeof web3Provider.request === "function") web3Provider.request({ method: "eth_requestAccounts" });
+      const resultData = await web3Provider.send(data.method, data.params)
       resolve({ jsonrpc: '2.0', result: resultData.result, id: data.id })
     } catch (error) {
       reject(error)
